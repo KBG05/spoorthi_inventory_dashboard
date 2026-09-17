@@ -20,7 +20,7 @@ import { useThemeMode } from '../theme/ThemeProvider';
 export function Login() {
   const { user, login } = useAuth();
   const { mode, toggleTheme } = useThemeMode();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -34,9 +34,9 @@ export function Login() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(username, password);
     } catch {
-      setError('Invalid email or password');
+      setError('Invalid username or password');
     } finally {
       setSubmitting(false);
     }
@@ -95,11 +95,11 @@ export function Login() {
             <form onSubmit={handleSubmit}>
               <TextField
                 fullWidth
-                label="Email"
-                type="email"
+                label="Username"
+                type="text"
                 variant="outlined"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
                 autoFocus
                 sx={{ mb: 2 }}

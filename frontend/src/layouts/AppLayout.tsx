@@ -88,7 +88,7 @@ export function AppLayout() {
                   Logged in as
                 </Typography>
                 <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                  {user?.email}
+                  {user?.username}
                 </Typography>
               </Box>
               <Divider />

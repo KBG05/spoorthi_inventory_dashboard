@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8000`;
+const API_PORT = import.meta.env.VITE_API_PORT || '8000';
+
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:${API_PORT}`;
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

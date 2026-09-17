@@ -1,4 +1,4 @@
-"""Create (or reset the password of) an admin user. Usage: python scripts/seed_user.py <email> <password>"""
+"""Create (or reset the password of) an admin user. Usage: python scripts/seed_user.py <username> <password>"""
 
 import sys
 
@@ -8,20 +8,20 @@ from app.security import hash_password
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python scripts/seed_user.py <email> <password>")
+        print("Usage: python scripts/seed_user.py <username> <password>")
         sys.exit(1)
-    email, password = sys.argv[1], sys.argv[2]
+    username, password = sys.argv[1], sys.argv[2]
 
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(User.username == username).first()
         if user is None:
-            user = User(email=email, hashed_password=hash_password(password), role="admin")
+            user = User(username=username, hashed_password=hash_password(password), role="admin")
             db.add(user)
-            print(f"Created user {email}")
+            print(f"Created user {username}")
         else:
             user.hashed_password = hash_password(password)
-            print(f"Updated password for {email}")
+            print(f"Updated password for {username}")
         db.commit()
     finally:
         db.close()
