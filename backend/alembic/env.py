@@ -13,9 +13,13 @@ from app.config import settings  # noqa: E402
 from app.database import Base  # noqa: E402
 from app.models_orm import (  # noqa: E402, F401
     AbcXyzResult,
+    CategoryMaster,
+    FactProcurement,
     IngestionRun,
+    MaterialMaster,
     RawConsumption,
-    RawProcurement,
+    SupplierMaster,
+    TimeMaster,
     User,
 )
 

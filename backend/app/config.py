@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60 * 12
 
     consumption_file: Path = DATA_RAW_DIR / "Raw Material Consumption data from April 2025 to August 2026.xlsx"
-    procurement_file: Path = DATA_RAW_DIR / "Format - Raw Material Received Details for IO.xlsx"
+    # Loaded once into the procurement star schema by scripts/load_procurement.py.
+    procurement_file: Path = PROJECT_ROOT / "data" / "Inventory_Procurement_raw_file.xlsx"
 
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 

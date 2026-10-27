@@ -4,8 +4,9 @@ running the rolling-12-month classification every month over its full data histo
 Unlike the sales pipeline (which creates a new Postgres table per month, e.g.
 rolling_abc_xyz_summary_2025_07), this reuses the single append-only abc_xyz_results
 table: each simulated monthly run gets its own ingestion_runs row (run_id), and that
-run_id tags its slice of abc_xyz_results rows. Requires raw_consumption/raw_procurement
-to already be populated (run a normal /ingestion/recompute once first).
+run_id tags its slice of abc_xyz_results rows. Requires raw_consumption
+and the procurement star schema to already be populated (run scripts/load_procurement.py
+and a normal /ingestion/recompute once first).
 
 Usage: python scripts/backfill_snapshots.py
 """
@@ -35,7 +36,8 @@ def main() -> None:
             text("SELECT MIN(issue_date), MAX(issue_date) FROM raw_consumption")
         ).first()
         (consumption_file,) = conn.execute(text("SELECT source_file FROM raw_consumption LIMIT 1")).first()
-        (procurement_file,) = conn.execute(text("SELECT source_file FROM raw_procurement LIMIT 1")).first()
+        procurement_row = conn.execute(text("SELECT source_file FROM fact_procurement LIMIT 1")).first()
+    procurement_file = procurement_row[0] if procurement_row else None
 
     if min_date is None:
         raise SystemExit("raw_consumption is empty. Run a normal /ingestion/recompute first.")

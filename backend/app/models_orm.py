@@ -10,6 +10,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -37,36 +38,81 @@ class RawConsumption(Base):
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class RawProcurement(Base):
-    __tablename__ = "raw_procurement"
+# ---------------------------------------------------------------------------
+# Procurement star schema, loaded once from Inventory_Procurement_raw_file.xlsx
+# (scripts/load_procurement.py). IDs are kept exactly as in the workbook so the
+# fact table links to the masters the same way the workbook's Notes describe.
+# ---------------------------------------------------------------------------
+
+
+class TimeMaster(Base):
+    """One row per calendar month: Jan 2017 = 1 ... Dec 2026 = 120, no gaps."""
+
+    __tablename__ = "time_master"
     __table_args__ = (
-        CheckConstraint("procurement_qty IS NULL OR procurement_qty >= 0", name="ck_raw_procurement_qty_nonneg"),
-        CheckConstraint("unit_price IS NULL OR unit_price >= 0", name="ck_raw_procurement_price_nonneg"),
-        CheckConstraint("procurement_cost IS NULL OR procurement_cost >= 0", name="ck_raw_procurement_cost_nonneg"),
+        CheckConstraint("month BETWEEN 1 AND 12", name="ck_time_master_month_range"),
+        UniqueConstraint("year", "month", name="uq_time_master_year_month"),
+    )
+
+    time_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    month: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+
+class SupplierMaster(Base):
+    __tablename__ = "supplier_master"
+
+    supplier_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    supplier_code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    supplier_name: Mapped[str | None] = mapped_column(String(255))
+
+
+class MaterialMaster(Base):
+    """material_code is the same key as raw_consumption.item_code."""
+
+    __tablename__ = "material_master"
+    __table_args__ = (
         CheckConstraint(
             "criticality_score IS NULL OR criticality_score BETWEEN 1 AND 5",
-            name="ck_raw_procurement_criticality_range",
+            name="ck_material_master_criticality_range",
         ),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    material_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    material_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    material_code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
-    receipt_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    procurement_qty: Mapped[float | None] = mapped_column(Numeric(14, 2))
-    unit_price: Mapped[float | None] = mapped_column(Numeric(14, 2))
-    procurement_cost: Mapped[float | None] = mapped_column(Numeric(16, 2))
-    lead_time_days: Mapped[float | None] = mapped_column(Numeric(8, 2))
-    supplier_code: Mapped[str | None] = mapped_column(String(50))
-    supplier_name: Mapped[str | None] = mapped_column(String(255))
-    po_no: Mapped[str | None] = mapped_column(String(50))
-    po_date: Mapped[date | None] = mapped_column(Date)
-    invoice_date: Mapped[date | None] = mapped_column(Date)
-    grn_num: Mapped[str | None] = mapped_column(String(50))
-    grn_date: Mapped[date | None] = mapped_column(Date)
     criticality_score: Mapped[int | None] = mapped_column(SmallInteger)
-    item_category: Mapped[str | None] = mapped_column(String(100))
-    source_sheet: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class CategoryMaster(Base):
+    __tablename__ = "category_master"
+
+    category_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    item_category: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+
+
+class FactProcurement(Base):
+    """One row per PO line. po_time_id is the PO month (derived from PO Date, not GRN
+    date). Category lives here, not on the material, because it varies per PO line
+    for the same material. Cost is kept as in the source even where qty x price != cost."""
+
+    __tablename__ = "fact_procurement"
+    __table_args__ = (
+        CheckConstraint("quantity >= 0", name="ck_fact_procurement_qty_nonneg"),
+        CheckConstraint("unit_price >= 0", name="ck_fact_procurement_price_nonneg"),
+        CheckConstraint("cost >= 0", name="ck_fact_procurement_cost_nonneg"),
+        CheckConstraint("actual_lead_time_days >= 0", name="ck_fact_procurement_lead_time_nonneg"),
+    )
+
+    transaction_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    po_time_id: Mapped[int] = mapped_column(ForeignKey("time_master.time_id"), nullable=False, index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("supplier_master.supplier_id"), nullable=False, index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("material_master.material_id"), nullable=False, index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("category_master.category_id"), nullable=False, index=True)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    cost: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
+    actual_lead_time_days: Mapped[int] = mapped_column(nullable=False)
     source_file: Mapped[str] = mapped_column(String(255), nullable=False)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

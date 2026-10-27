@@ -6,15 +6,16 @@ cutoffs for ABC, month-over-month coefficient-of-variation for XYZ), applied
 here to raw-material consumption instead of sales revenue/quantity.
 
 Two-phase design:
-  1. ingest_raw_data(): parses the source Excel files and reloads the
-     `raw_consumption` / `raw_procurement` staging tables (full replace).
-  2. compute_abc / compute_xyz / enrich: read FROM those staging tables
-     (not from Excel again) to produce the final classification.
+  1. ingest_raw_data(): parses the consumption Excel file and reloads the
+     `raw_consumption` staging table (full replace).
+  2. compute_abc / compute_xyz / enrich: read FROM the database (not from Excel
+     again) to produce the final classification. Enrichment reads the procurement
+     star schema (material_master / fact_procurement), loaded separately by
+     app/automation/procurement.py.
 """
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, timezone
 
 import pandas as pd
@@ -22,32 +23,6 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 CONSUMPTION_SHEET = "RM - Consumption data"
-
-_PROCUREMENT_COLUMN_MAP = {
-    "day": "day",
-    "month": "month",
-    "year": "year",
-    "materialid": "material_id",
-    "description": "description",
-    "procurementquantity": "procurement_qty",
-    "unitprice": "unit_price",
-    "procurementcost": "procurement_cost",
-    "leadtime(days)": "lead_time_days",
-    "suppliercode": "supplier_code",
-    "suppliername": "supplier_name",
-    "pono": "po_no",
-    "podate": "po_date",
-    "invoicedate": "invoice_date",
-    "grnnum": "grn_num",
-    "grndate": "grn_date",
-    "criticalityscore": "criticality_score",
-    "itemcategory": "item_category",
-}
-
-
-def _normalize_key(col: object) -> str:
-    return re.sub(r"\s+", "", str(col)).lower()
-
 
 # ---------------------------------------------------------------------------
 # Phase 1: Excel loading
@@ -75,87 +50,27 @@ def load_consumption_excel(path: str) -> pd.DataFrame:
     ]
 
 
-def _load_procurement_sheet(path: str, sheet_name: str, source_sheet: str) -> pd.DataFrame:
-    df = pd.read_excel(path, sheet_name=sheet_name, header=1)
-    rename_map = {}
-    for col in df.columns:
-        canonical = _PROCUREMENT_COLUMN_MAP.get(_normalize_key(col))
-        if canonical:
-            rename_map[col] = canonical
-    df = df.rename(columns=rename_map)
-    df["material_id"] = df["material_id"].astype(str).str.strip()
-    df["receipt_date"] = pd.to_datetime(
-        dict(year=df["year"], month=df["month"], day=df["day"]), errors="coerce"
-    ).dt.date
-    for date_col in ("po_date", "invoice_date", "grn_date"):
-        if date_col in df.columns:
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce").dt.date
-    df["source_sheet"] = source_sheet
-    keep_cols = [
-        "material_id",
-        "description",
-        "receipt_date",
-        "procurement_qty",
-        "unit_price",
-        "procurement_cost",
-        "lead_time_days",
-        "supplier_code",
-        "supplier_name",
-        "po_no",
-        "po_date",
-        "invoice_date",
-        "grn_num",
-        "grn_date",
-        "criticality_score",
-        "item_category",
-        "source_sheet",
-    ]
-    return df[keep_cols]
-
-
-def load_procurement_excel(path: str) -> pd.DataFrame:
-    """Read + concat both procurement sheets into a raw_procurement-shaped frame."""
-    xls = pd.ExcelFile(path)
-    real_sheets = [s for s in xls.sheet_names if "RM" in s.upper() and "DATA" in s.upper()]
-    if len(real_sheets) != 2:
-        raise ValueError(f"Expected exactly 2 procurement data sheets, found {real_sheets} in {path}")
-
-    frames = [_load_procurement_sheet(path, sheet, source_sheet=sheet) for sheet in real_sheets]
-    combined = pd.concat(frames, ignore_index=True)
-
-    # Tag sheets "old"/"new" by which has the earlier minimum receipt_date, rather than
-    # trusting sheet-name text (names are free-form and have changed before).
-    min_dates = combined.groupby("source_sheet")["receipt_date"].min()
-    old_sheet_name = min_dates.idxmin()
-    combined["source_sheet"] = combined["source_sheet"].apply(
-        lambda s: "old" if s == old_sheet_name else "new"
-    )
-    return combined
-
-
 # ---------------------------------------------------------------------------
 # Phase 1: persist raw data (full replace)
 # ---------------------------------------------------------------------------
 
 
-def ingest_raw_data(consumption_path: str, procurement_path: str, engine: Engine) -> dict:
+def ingest_raw_data(consumption_path: str, engine: Engine) -> dict:
+    """Reloads raw_consumption only. Procurement lives in the star schema, which is
+    loaded once by scripts/load_procurement.py and is not touched here."""
     consumption_df = load_consumption_excel(consumption_path)
-    procurement_df = load_procurement_excel(procurement_path)
 
     consumption_df = consumption_df.copy()
     consumption_df["source_file"] = str(consumption_path)
-    procurement_df = procurement_df.copy()
-    procurement_df["source_file"] = str(procurement_path)
 
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE TABLE raw_consumption RESTART IDENTITY"))
-        conn.execute(text("TRUNCATE TABLE raw_procurement RESTART IDENTITY"))
         consumption_df.to_sql("raw_consumption", conn, if_exists="append", index=False)
-        procurement_df.to_sql("raw_procurement", conn, if_exists="append", index=False)
+        rows_procurement = conn.execute(text("SELECT COUNT(*) FROM fact_procurement")).scalar_one()
 
     return {
         "rows_consumption": len(consumption_df),
-        "rows_procurement": len(procurement_df),
+        "rows_procurement": rows_procurement,
     }
 
 
@@ -253,25 +168,32 @@ def merge_abc_xyz(abc_df: pd.DataFrame, xyz_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def enrich(abcxyz_df: pd.DataFrame, engine: Engine) -> pd.DataFrame:
-    """Left-join the most recent Criticality Score / Item Category per Material ID."""
+    """Left-join Criticality Score (from material_master) and the Item Category of the
+    most recent PO line per material (latest PO month, then latest transaction)."""
     query = text(
         """
-        SELECT DISTINCT ON (material_id)
-            material_id, criticality_score, item_category
-        FROM raw_procurement
-        ORDER BY material_id, grn_date DESC NULLS LAST, po_date DESC NULLS LAST
+        SELECT m.material_code, m.criticality_score, latest.item_category
+        FROM material_master m
+        LEFT JOIN LATERAL (
+            SELECT c.item_category
+            FROM fact_procurement f
+            JOIN category_master c ON c.category_id = f.category_id
+            WHERE f.material_id = m.material_id
+            ORDER BY f.po_time_id DESC, f.transaction_id DESC
+            LIMIT 1
+        ) latest ON TRUE
         """
     )
     with engine.connect() as conn:
         enrichment_df = pd.read_sql_query(query, conn)
     merged = abcxyz_df.merge(
-        enrichment_df, left_on="item_code", right_on="material_id", how="left"
-    ).drop(columns=["material_id"])
+        enrichment_df, left_on="item_code", right_on="material_code", how="left"
+    ).drop(columns=["material_code"])
     return merged
 
 
-def run_full_pipeline(consumption_path: str, procurement_path: str, engine: Engine) -> dict:
-    ingest_counts = ingest_raw_data(consumption_path, procurement_path, engine)
+def run_full_pipeline(consumption_path: str, engine: Engine) -> dict:
+    ingest_counts = ingest_raw_data(consumption_path, engine)
 
     with engine.connect() as conn:
         max_date_row = conn.execute(text("SELECT MAX(issue_date) FROM raw_consumption")).first()

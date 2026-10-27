@@ -112,7 +112,6 @@ class IngestionStatusResponse(BaseModel):
 
 class RecomputeRequest(BaseModel):
     consumption_path: str | None = None
-    procurement_path: str | None = None
 
 
 class RecomputeStartedResponse(BaseModel):
