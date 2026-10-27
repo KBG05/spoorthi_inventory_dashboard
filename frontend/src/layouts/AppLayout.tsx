@@ -63,7 +63,7 @@ export function AppLayout() {
                   borderColor: mode === 'light' ? 'rgba(64, 91, 130, 0.25)' : 'rgba(255, 255, 255, 0.3)',
                 }}
               >
-                <img src="/Spoorthi-Logo.png" alt="Spoorthi Logo" style={{ height: 40, width: 'auto', display: 'block' }} />
+                <img src={`${import.meta.env.BASE_URL}Spoorthi-Logo.png`} alt="Spoorthi Logo" style={{ height: 40, width: 'auto', display: 'block' }} />
               </Box>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>
                 Raw Material Inventory

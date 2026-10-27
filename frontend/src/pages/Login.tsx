@@ -60,7 +60,7 @@ export function Login() {
               borderColor: mode === 'light' ? 'rgba(64, 91, 130, 0.25)' : 'rgba(255, 255, 255, 0.3)',
             }}
           >
-            <img src="/Spoorthi-Logo.png" alt="Spoorthi Logo" style={{ height: 30, width: 'auto', display: 'block' }} />
+            <img src={`${import.meta.env.BASE_URL}Spoorthi-Logo.png`} alt="Spoorthi Logo" style={{ height: 30, width: 'auto', display: 'block' }} />
           </Box>
           <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600 }}>
             Raw Material Inventory
